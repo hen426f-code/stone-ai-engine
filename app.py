@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+"""שרת המנוע — מריץ את המחולל המוכח של הן: תוכנית חיתוך יפה (PDF) + DXF למכונה.
+Endpoints: /api/plan (מטבח L מסקיצה/ידני), /api/prodim (קובץ מודד)."""
+import base64, io, tempfile, os
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import gen_lib as G
+from gen_lib import Kitchen
+import plan_builder as PB
+import dxf_engine as DE
+import prodim_reader as PR
+
+app = Flask(__name__)
+CORS(app)
+
+def _b64_file(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+@app.get("/")
+def health():
+    return jsonify({"ok": True, "service": "stone-ai-engine",
+                    "endpoints": ["/api/plan", "/api/prodim"]})
+
+@app.post("/api/plan")
+def plan():
+    """מטבח L. body: {long,arm,depth,arm_side,sink,gas,material}"""
+    try:
+        b = request.get_json(force=True)
+        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        k = Kitchen(float(b["long"]), float(b["arm"]), float(b["depth"]),
+                    b.get("arm_side", "left"), sink=b.get("sink"), gas=b.get("gas"))
+        job = b.get("job_name", "")
+        with tempfile.TemporaryDirectory() as td:
+            pdf_path = os.path.join(td, "plan.pdf")
+            PB.render_plan(k, mat["slabL"], pdf_path, job)
+            # DXF for the RECOMMENDED combo (combo 1: whole long + arm-ext) if it fits, else split
+            combos = PB.build_combos(k, mat["slabL"])
+            pieces = _combo_to_pieces(combos[0], k) if combos else []
+            dxf_text, slabs = DE.gen_dxf(pieces, mat) if pieces else ("", [])
+            return jsonify({"ok": True, "pdf": _b64_file(pdf_path),
+                            "dxf": dxf_text, "combos": len(combos),
+                            "slabs": len(slabs)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+def _combo_to_pieces(combo, k):
+    """ממיר חתיכות הקומבינציה לרשימת {len,depth,openings} למנוע ה-DXF."""
+    _, _, pieces, _, _ = combo
+    out = []
+    for p in pieces:
+        is_v = p.get("orientation") == "vertical"
+        ln = p["length_cm"] if not is_v else p["length_cm"]
+        dp = k.depth_cm
+        ops = []
+        for op in p.get("openings", []) or []:
+            if op.get("w") and op.get("h"):
+                ops.append({"from_left_cm": op["from_left_cm"], "w": op["w"], "h": op["h"],
+                            "fromFront": op.get("from_front_cm")})
+        out.append({"len": ln, "depth": dp, "openings": ops})
+    return out
+
+@app.post("/api/prodim")
+def prodim():
+    """קובץ מודד. multipart 'file' או body {dxf_text}. + material."""
+    try:
+        material = request.form.get("material") or (request.get_json(silent=True) or {}).get("material", "porcelan")
+        mat = DE.MATERIALS.get(material, DE.MATERIALS["porcelan"])
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, "in.dxf")
+            if "file" in request.files:
+                request.files["file"].save(src)
+            else:
+                txt = (request.get_json(silent=True) or {}).get("dxf_text", "")
+                open(src, "w", encoding="utf-8", errors="ignore").write(txt)
+            pieces, mitre = PR.read_prodim(src)
+            if not pieces:
+                return jsonify({"ok": False, "error": "לא זוהו חתיכות (ירוק=עיבוד) בקובץ"}), 400
+            pdf_path = os.path.join(td, "prodim.pdf")
+            PR.render_prodim_plan(pieces, mat, pdf_path, mitre)
+            dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
+            return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
+                            "pieces": len(pieces), "slabs": len(slabs), "mitre": mitre})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
