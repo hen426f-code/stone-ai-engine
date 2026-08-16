@@ -13,6 +13,15 @@ import prodim_reader as PR
 app = Flask(__name__)
 CORS(app)
 
+def _f(v, default=None):
+    """המרה בטוחה למספר: None/ריק/טקסט לא-מספרי -> default"""
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
 def _b64_file(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -97,18 +106,26 @@ def pieces_endpoint():
             ops = []
             for o in (p.get("openings") or []):
                 if o.get("w") and o.get("h"):
-                    ops.append({"kind": o.get("kind", "פתח"),
-                                "from_left_cm": float(o.get("from_left_cm", 0)),
-                                "from_front_cm": float(o.get("from_front_cm", 0)),
-                                "w": float(o["w"]), "h": float(o["h"])})
-            d = {"len": float(p["len"]), "depth": float(p["depth"]),
+                    ow, oh = _f(o.get("w")), _f(o.get("h"))
+                    if not ow or not oh:
+                        continue
+                    ops.append({"kind": o.get("kind") or "פתח",
+                                "from_left_cm": _f(o.get("from_left_cm"), 0) or 0,
+                                "from_front_cm": _f(o.get("from_front_cm"), 0) or 0,
+                                "w": ow, "h": oh})
+            plen, pdep = _f(p.get("len")), _f(p.get("depth"))
+            if not plen or not pdep or plen <= 0 or pdep <= 0:
+                return None
+            d = {"len": plen, "depth": pdep,
                  "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
                  "openings": ops}
             if p.get("fe_cm"):
-                d["fe_cm"] = float(p["fe_cm"]); d["fe_from_cm"] = float(p.get("fe_from_cm") or 0)
+                fe = _f(p.get("fe_cm"))
+                if fe and fe > 0:
+                    d["fe_cm"] = fe; d["fe_from_cm"] = _f(p.get("fe_from_cm"), 0) or 0
             return d
-        allp = [norm(p) for p in raw if p.get("len") and p.get("depth")]
-        allp += [norm(p, True) for p in clad if p.get("len") and p.get("depth")]
+        allp = [x for x in (norm(p) for p in raw) if x]
+        allp += [x for x in (norm(p, True) for p in clad) if x]
         if not allp:
             return jsonify({"ok": False, "error": "לא התקבלו חתיכות"}), 400
         with tempfile.TemporaryDirectory() as td:
