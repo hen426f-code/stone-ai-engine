@@ -20,7 +20,7 @@ def _b64_file(path):
 @app.get("/")
 def health():
     return jsonify({"ok": True, "service": "stone-ai-engine",
-                    "endpoints": ["/api/plan", "/api/prodim"]})
+                    "endpoints": ["/api/plan", "/api/prodim", "/api/pieces"]})
 
 @app.post("/api/plan")
 def plan():
@@ -81,6 +81,39 @@ def prodim():
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(pieces), "slabs": len(slabs), "mitre": mitre})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.post("/api/pieces")
+def pieces_endpoint():
+    """חתיכות כלליות (מסקיצה/ידני): {pieces:[{len,depth,label?,openings:[{kind,from_left_cm,from_front_cm,w,h}]}],
+       cladding:[{len,depth,label?}], material, job_name} -> PDF יפה + DXF."""
+    try:
+        b = request.get_json(force=True)
+        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        raw = b.get("pieces") or []
+        clad = b.get("cladding") or []
+        def norm(p, is_clad=False):
+            ops = []
+            for o in (p.get("openings") or []):
+                if o.get("w") and o.get("h"):
+                    ops.append({"kind": o.get("kind", "פתח"),
+                                "from_left_cm": float(o.get("from_left_cm", 0)),
+                                "from_front_cm": float(o.get("from_front_cm", 0)),
+                                "w": float(o["w"]), "h": float(o["h"])})
+            return {"len": float(p["len"]), "depth": float(p["depth"]),
+                    "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
+                    "openings": ops}
+        allp = [norm(p) for p in raw if p.get("len") and p.get("depth")]
+        allp += [norm(p, True) for p in clad if p.get("len") and p.get("depth")]
+        if not allp:
+            return jsonify({"ok": False, "error": "לא התקבלו חתיכות"}), 400
+        with tempfile.TemporaryDirectory() as td:
+            pdf_path = os.path.join(td, "plan.pdf")
+            PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""))
+            dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
+            return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
+                            "pieces": len(allp), "slabs": len(slabs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
