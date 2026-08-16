@@ -6,7 +6,7 @@ from reportlab.pdfgen import canvas
 import gen_lib as G
 from gen_lib import (PAGE, PAGE_W, PAGE_H, C_BG, C_LINE, C_MUTED, C_NEUTRAL, C_ACCENT,
                      C_FRONT, C_GAS_F, C_GAS_S, C_SINK_F, C_SINK_S, PIECE_COLORS,
-                     draw_header, draw_notes, heb, FONT_NAME, FONT_BOLD)
+                     draw_header, draw_notes, heb, FONT_NAME, FONT_BOLD, fe_h)
 from reportlab.lib.colors import HexColor, white
 
 # ACI צבע -> משמעות (מקרא Prodim של הן)
@@ -113,6 +113,12 @@ def _draw_piece(c, x, y, w_cm, h_cm, scale, color, num, piece):
     # מספר
     c.setFillColor(white); c.circle(x+13, y+Hh-13, 9, fill=1, stroke=0)
     c.setFillColor(color); c.setFont(FONT_BOLD, 11); c.drawCentredString(x+13, y+Hh-17, str(num))
+    # עיבוד חזית (אם מסומן)
+    fe = piece.get("fe_cm")
+    if fe:
+        fx1 = x + float(piece.get("fe_from_cm", 0)) * scale
+        fx2 = min(fx1 + float(fe) * scale, x + W)
+        fe_h(c, fx1, fx2, y, f"{float(fe):g}", below=True)
     # פתחים
     for op in piece["openings"]:
         name = op["kind"]
@@ -127,7 +133,7 @@ def _draw_piece(c, x, y, w_cm, h_cm, scale, color, num, piece):
         c.setFillColor(sF); c.setFont(FONT_BOLD, 7)
         c.drawCentredString(ocx, ocy-3, heb(f"{name} {op['w']:g}×{op['h']:g}"))
 
-def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name=""):
+def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name="", title=None):
     from dxf_engine import nest_pieces
     slabs = nest_pieces([dict(p) for p in pieces], mat["slabL"], mat["slabW"])
     c = canvas.Canvas(out_path, pagesize=PAGE)
@@ -135,7 +141,7 @@ def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name=""):
     total = len(slabs) + 1
     # עמוד 1 — רשימת חתיכות
     bg()
-    draw_header(c, (job_name+"  ·  " if job_name else "")+"קובץ מודד (Prodim) · חתיכות לחיתוך",
+    draw_header(c, (job_name+"  ·  " if job_name else "")+(title or "חתיכות לחיתוך"),
                 f"{len(pieces)} חתיכות · {mat['he']} · לוח {mat['slabL']}×{mat['slabW']}", 1, total)
     # פריסת החתיכות בשורות
     x = 60; y = PAGE_H-140; rowh = 0; scale = min(0.9, (PAGE_W-120)/max(p['len'] for p in pieces))
@@ -147,7 +153,8 @@ def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name=""):
             break
         _draw_piece(c, x, y-Hh, p['len'], p['depth'], scale, PIECE_COLORS[i % len(PIECE_COLORS)], i+1, p)
         x += W + 55; rowh = max(rowh, Hh)
-    notes = ["כל החתיכות מקובץ המודד — כבר מחולקות ומוכנות לחיתוך.",
+    notes = ["כל החתיכות מוכנות לחיתוך.",
+             "עיבוד חזית מסומן בקו כתום עם הסימן ‖ ואורך העיבוד.",
              "הפתחים (כיור/כיריים/שקע) מסומנים על כל חתיכה עם המידות."]
     if has_mitre: notes.append("שים לב: יש בקובץ חיתוכי גרונג (46°) — מבוצעים בהטיית הראש.")
     draw_notes(c, notes)

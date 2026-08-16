@@ -101,16 +101,19 @@ def pieces_endpoint():
                                 "from_left_cm": float(o.get("from_left_cm", 0)),
                                 "from_front_cm": float(o.get("from_front_cm", 0)),
                                 "w": float(o["w"]), "h": float(o["h"])})
-            return {"len": float(p["len"]), "depth": float(p["depth"]),
-                    "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
-                    "openings": ops}
+            d = {"len": float(p["len"]), "depth": float(p["depth"]),
+                 "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
+                 "openings": ops}
+            if p.get("fe_cm"):
+                d["fe_cm"] = float(p["fe_cm"]); d["fe_from_cm"] = float(p.get("fe_from_cm") or 0)
+            return d
         allp = [norm(p) for p in raw if p.get("len") and p.get("depth")]
         allp += [norm(p, True) for p in clad if p.get("len") and p.get("depth")]
         if not allp:
             return jsonify({"ok": False, "error": "לא התקבלו חתיכות"}), 400
         with tempfile.TemporaryDirectory() as td:
             pdf_path = os.path.join(td, "plan.pdf")
-            PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""))
+            PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""), title="חתיכות לחיתוך")
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(allp), "slabs": len(slabs)})
