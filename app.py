@@ -32,6 +32,27 @@ def _remnants(slabs):
                 out.append({"slab": i + 1, "len": w, "depth": h})
     return out
 
+def norm_piece(p, is_clad=False):
+    ops = []
+    for o in (p.get("openings") or []):
+        ow, oh = _f(o.get("w")), _f(o.get("h"))
+        if not ow or not oh:
+            continue
+        ops.append({"kind": o.get("kind") or "פתח",
+                    "from_left_cm": _f(o.get("from_left_cm"), 0) or 0,
+                    "from_front_cm": _f(o.get("from_front_cm"), 0) or 0,
+                    "w": ow, "h": oh})
+    plen, pdep = _f(p.get("len")), _f(p.get("depth"))
+    if not plen or not pdep or plen <= 0 or pdep <= 0:
+        return None
+    d = {"len": plen, "depth": pdep,
+         "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
+         "openings": ops}
+    fe = _f(p.get("fe_cm"))
+    if fe and fe > 0:
+        d["fe_cm"] = fe; d["fe_from_cm"] = _f(p.get("fe_from_cm"), 0) or 0
+    return d
+
 def _b64_file(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -39,7 +60,7 @@ def _b64_file(path):
 @app.get("/")
 def health():
     return jsonify({"ok": True, "service": "stone-ai-engine",
-                    "endpoints": ["/api/plan", "/api/prodim", "/api/pieces"]})
+                    "endpoints": ["/api/plan", "/api/prodim", "/api/pieces", "/api/combos"]})
 
 @app.post("/api/plan")
 def plan():
@@ -144,6 +165,44 @@ def pieces_endpoint():
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.post("/api/combos")
+def combos_endpoint():
+    """כל הקומבינציות במסמך אחד + DXF לכל אחת.
+    body: {combos:[{title, note, pieces:[{len,depth,label,fe_cm,openings}]}],
+           cladding:[...], material, job_name}"""
+    try:
+        b = request.get_json(force=True)
+        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        clad = [x for x in (norm_piece(p, True) for p in (b.get("cladding") or [])) if x]
+        combos = b.get("combos") or []
+        if not combos:
+            return jsonify({"ok": False, "error": "לא התקבלו קומבינציות"}), 400
+        job = b.get("job_name", "")
+        out = []
+        from pypdf import PdfWriter, PdfReader
+        import io as _io
+        writer = PdfWriter()
+        with tempfile.TemporaryDirectory() as td:
+            for i, c in enumerate(combos):
+                pcs = [x for x in (norm_piece(p) for p in (c.get("pieces") or [])) if x]
+                allp = pcs + clad
+                if not allp:
+                    continue
+                title = "קומבינציה %d · %s" % (i + 1, c.get("title", ""))
+                pth = os.path.join(td, "c%d.pdf" % i)
+                PR.render_prodim_plan(allp, mat, pth, False, job, title=title)
+                for pg in PdfReader(pth).pages:
+                    writer.add_page(pg)
+                dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
+                out.append({"title": c.get("title", ""), "note": c.get("note", ""),
+                            "dxf": dxf_text, "slabs": len(slabs),
+                            "pieces": len(allp), "remnants": _remnants(slabs)})
+            buf = _io.BytesIO(); writer.write(buf)
+            pdf_b64 = base64.b64encode(buf.getvalue()).decode()
+        return jsonify({"ok": True, "pdf": pdf_b64, "combos": out})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
