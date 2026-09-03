@@ -22,6 +22,16 @@ def _f(v, default=None):
     except (TypeError, ValueError):
         return default
 
+def _remnants(slabs):
+    """רשימת שאריות פנויות מכל הלוחות: [{slab, len, depth}]"""
+    out = []
+    for i, sl in enumerate(slabs):
+        for r in sl.get("remnants", []):
+            w, h = round(float(r["w"]), 1), round(float(r["h"]), 1)
+            if w >= 5 and h >= 5:
+                out.append({"slab": i + 1, "len": w, "depth": h})
+    return out
+
 def _b64_file(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -49,7 +59,7 @@ def plan():
             dxf_text, slabs = DE.gen_dxf(pieces, mat) if pieces else ("", [])
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path),
                             "dxf": dxf_text, "combos": len(combos),
-                            "slabs": len(slabs)})
+                            "slabs": len(slabs), "remnants": _remnants(slabs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -89,7 +99,7 @@ def prodim():
             PR.render_prodim_plan(pieces, mat, pdf_path, mitre)
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
-                            "pieces": len(pieces), "slabs": len(slabs), "mitre": mitre})
+                            "pieces": len(pieces), "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -133,7 +143,7 @@ def pieces_endpoint():
             PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""), title="חתיכות לחיתוך")
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
-                            "pieces": len(allp), "slabs": len(slabs)})
+                            "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
