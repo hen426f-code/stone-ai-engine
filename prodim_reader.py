@@ -91,8 +91,13 @@ def read_prodim(path_or_stream, min_cm=12):
             for pc in pieces:
                 bx0, by0, bx1, by1 = pc["bbox"]
                 if bx0 <= ocx <= bx1 and by0 <= ocy <= by1:
+                    ow_cm = round((ox1-ox0)/10, 1); oh_cm = round((oy1-oy0)/10, 1)
+                    kind = name
+                    # פתח קטן = פתח חשמל (מידה סטנדרטית), לא כיור/כיריים
+                    if max(ow_cm, oh_cm) <= 25 and min(ow_cm, oh_cm) <= 15:
+                        kind = "חשמל"
                     pc["openings"].append({
-                        "kind": name,
+                        "kind": kind,
                         "from_left_cm": round((ocx-bx0)/10, 1),
                         "from_front_cm": round((ocy-by0)/10, 1),
                         "w": round((ox1-ox0)/10, 1), "h": round((oy1-oy0)/10, 1)})
@@ -124,7 +129,7 @@ def _draw_piece(c, x, y, w_cm, h_cm, scale, color, num, piece):
         name = op["kind"]
         fF, sF = (C_SINK_F, C_SINK_S)
         if name == "כיריים": fF, sF = HexColor("#FCE7F3"), HexColor("#DB2777")
-        elif name == "שקע": fF, sF = HexColor("#CFFAFE"), HexColor("#0891B2")
+        elif name in ("שקע", "חשמל"): fF, sF = HexColor("#CFFAFE"), HexColor("#0891B2")
         ocx = x + op["from_left_cm"]*scale
         ocy = y + op["from_front_cm"]*scale
         ow = op["w"]*scale; oh = op["h"]*scale
