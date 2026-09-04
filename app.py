@@ -119,8 +119,12 @@ def prodim():
             pdf_path = os.path.join(td, "prodim.pdf")
             PR.render_prodim_plan(pieces, mat, pdf_path, mitre)
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
+            plist = [{"label": p.get("label") or ("חתיכה %d" % (i + 1)),
+                      "len": p["len"], "depth": p["depth"],
+                      "openings": p.get("openings", [])} for i, p in enumerate(pieces)]
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
-                            "pieces": len(pieces), "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs)})
+                            "pieces": len(pieces), "pieces_list": plist,
+                            "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
