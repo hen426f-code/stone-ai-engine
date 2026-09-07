@@ -5,7 +5,8 @@
 import ezdxf
 
 KERF = 0.6
-PRIO_ACI = [1, 2, 3, 4, 5, 6, 8, 9, 9, 9]  # avoid 7 (white/black bg issues)
+ENVELOPE_ACI = 1   # מעטפת — תמיד אדום / עדיפות 1
+MITRE_ACI = 30     # גרונג — כתום
 OPENING_ACI = 9
 
 MATERIALS = {
@@ -65,19 +66,32 @@ def gen_dxf(pieces, mat):
     layer = "1000-" + str(cutDepth).replace(".", "_")
     doc = ezdxf.new("R12")
     if layer not in doc.layers:
-        doc.layers.add(layer, color=7)
+        doc.layers.add(layer, color=ENVELOPE_ACI)
     msp = doc.modelspace()
-    def rect(x, y, w, h, aci):
+    mlayer = "1000DPT" + str(cutDepth).replace(".", "_") + "INC46"
+    if mlayer not in doc.layers:
+        doc.layers.add(mlayer, color=MITRE_ACI)
+    def rect(x, y, w, h, aci, edges=None):
         pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
         pl = msp.add_polyline2d(pts, dxfattribs={"layer": layer, "color": aci})
         pl.close(True)
+        # גרונג: קו נפרד על השכבה עם הזווית, על הצלע שסומנה
+        if edges:
+            seg = {"front": ((x, y), (x + w, y)),
+                   "back":  ((x, y + h), (x + w, y + h)),
+                   "left":  ((x, y), (x, y + h)),
+                   "right": ((x + w, y), (x + w, y + h))}
+            for e, kind in edges.items():
+                if kind == "mitre" and e in seg:
+                    a, b = seg[e]
+                    msp.add_line(a, b, dxfattribs={"layer": mlayer, "color": MITRE_ACI})
     prio = 0; slabBase = 0.0
     for slab in slabs:
         for sh in slab["rows"]:
             for it in sh["items"]:
                 pc = it["pc"]; px = it["x"]*CM; py = (slabBase+it["y"])*CM
                 pw = pc["len"]*CM; ph = pc["depth"]*CM
-                rect(px, py, pw, ph, PRIO_ACI[min(prio, len(PRIO_ACI)-1)]); prio += 1
+                rect(px, py, pw, ph, ENVELOPE_ACI, pc.get("edges")); prio += 1
                 for op in pc.get("openings", []):
                     if op.get("w") and op.get("h"):
                         ow = op["w"]*CM; oh = op["h"]*CM

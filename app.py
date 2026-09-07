@@ -48,6 +48,8 @@ def norm_piece(p, is_clad=False):
     d = {"len": plen, "depth": pdep,
          "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
          "openings": ops}
+    if isinstance(p.get("edges"), dict):
+        d["edges"] = {k: v for k, v in p["edges"].items() if v in ("fe", "mitre")}
     fe = _f(p.get("fe_cm"))
     if fe and fe > 0:
         d["fe_cm"] = fe; d["fe_from_cm"] = _f(p.get("fe_from_cm"), 0) or 0
