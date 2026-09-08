@@ -139,28 +139,7 @@ def pieces_endpoint():
         mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
         raw = b.get("pieces") or []
         clad = b.get("cladding") or []
-        def norm(p, is_clad=False):
-            ops = []
-            for o in (p.get("openings") or []):
-                if o.get("w") and o.get("h"):
-                    ow, oh = _f(o.get("w")), _f(o.get("h"))
-                    if not ow or not oh:
-                        continue
-                    ops.append({"kind": o.get("kind") or "פתח",
-                                "from_left_cm": _f(o.get("from_left_cm"), 0) or 0,
-                                "from_front_cm": _f(o.get("from_front_cm"), 0) or 0,
-                                "w": ow, "h": oh})
-            plen, pdep = _f(p.get("len")), _f(p.get("depth"))
-            if not plen or not pdep or plen <= 0 or pdep <= 0:
-                return None
-            d = {"len": plen, "depth": pdep,
-                 "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
-                 "openings": ops}
-            if p.get("fe_cm"):
-                fe = _f(p.get("fe_cm"))
-                if fe and fe > 0:
-                    d["fe_cm"] = fe; d["fe_from_cm"] = _f(p.get("fe_from_cm"), 0) or 0
-            return d
+        norm = norm_piece
         allp = [x for x in (norm(p) for p in raw) if x]
         allp += [x for x in (norm(p, True) for p in clad) if x]
         if not allp:

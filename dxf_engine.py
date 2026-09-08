@@ -72,19 +72,22 @@ def gen_dxf(pieces, mat):
     if mlayer not in doc.layers:
         doc.layers.add(mlayer, color=MITRE_ACI)
     def rect(x, y, w, h, aci, edges=None):
-        pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-        pl = msp.add_polyline2d(pts, dxfattribs={"layer": layer, "color": aci})
-        pl.close(True)
-        # גרונג: קו נפרד על השכבה עם הזווית, על הצלע שסומנה
-        if edges:
-            seg = {"front": ((x, y), (x + w, y)),
-                   "back":  ((x, y + h), (x + w, y + h)),
-                   "left":  ((x, y), (x, y + h)),
-                   "right": ((x + w, y), (x + w, y + h))}
-            for e, kind in edges.items():
-                if kind == "mitre" and e in seg:
-                    a, b = seg[e]
-                    msp.add_line(a, b, dxfattribs={"layer": mlayer, "color": MITRE_ACI})
+        c = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+        # צלעות: front=תחתונה, right=ימנית, back=עליונה, left=שמאלית
+        segs = [("front", c[0], c[1]), ("right", c[1], c[2]),
+                ("back", c[2], c[3]), ("left", c[3], c[0])]
+        mit = {k for k, v in (edges or {}).items() if v == "mitre"}
+        if not mit:
+            pl = msp.add_polyline2d(c, dxfattribs={"layer": layer, "color": aci})
+            pl.close(True)
+            return
+        # יש גרונג: הצלעות הרגילות כקווים על שכבת החיתוך, וצלע הגרונג על שכבת הזווית
+        for name, a, bpt in segs:
+            if name in mit:
+                msp.add_line(a, bpt, dxfattribs={"layer": mlayer, "color": MITRE_ACI})
+            else:
+                msp.add_line(a, bpt, dxfattribs={"layer": layer, "color": aci})
+
     prio = 0; slabBase = 0.0
     for slab in slabs:
         for sh in slab["rows"]:
