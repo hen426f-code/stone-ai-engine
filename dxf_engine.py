@@ -19,9 +19,10 @@ def nest_pieces(pieces, slabL, slabW):
     oriented = []
     for p in pieces:
         ln, dp = p["len"], p["depth"]
+        rot = False
         if dp > slabW and ln <= slabW:
-            ln, dp = dp, ln
-        oriented.append({**p, "len": ln, "depth": dp})
+            ln, dp = dp, ln; rot = True
+        oriented.append({**p, "len": ln, "depth": dp, "rot": rot})
     order = sorted(enumerate(oriented), key=lambda t: (-t[1]["depth"], -t[1]["len"]))
     slabs = []; cur = {"rows": [], "usedH": 0.0}; shelf = {"ref": None}
     def new_slab():
@@ -88,18 +89,41 @@ def gen_dxf(pieces, mat):
             else:
                 msp.add_line(a, bpt, dxfattribs={"layer": layer, "color": aci})
 
+    ROT_EDGE = {"front": "right", "right": "back", "back": "left", "left": "front"}
     prio = 0; slabBase = 0.0
     for slab in slabs:
         for sh in slab["rows"]:
             for it in sh["items"]:
                 pc = it["pc"]; px = it["x"]*CM; py = (slabBase+it["y"])*CM
                 pw = pc["len"]*CM; ph = pc["depth"]*CM
-                rect(px, py, pw, ph, ENVELOPE_ACI, pc.get("edges")); prio += 1
+                rot = pc.get("rot")
+                # מידות המקור לפני סיבוב: סיבוב 90° נגד השעון, (x, y) -> (H - y, x)
+                W0, H0 = (ph, pw) if rot else (pw, ph)
+                def place(x, y):
+                    return (px + (H0 - y if rot else x), py + (x if rot else y))
+                if pc.get("outline"):
+                    # מתאר מדויק (קובץ מודד): פוליליין סגור אחד, כולל קשתות
+                    pts = [(*place(x, y), b) for x, y, b in pc["outline"]]
+                    pl = msp.add_polyline2d([(x, y) for x, y, _ in pts],
+                                            dxfattribs={"layer": layer, "color": ENVELOPE_ACI})
+                    for v, (_, _, b) in zip(pl.vertices, pts):
+                        if b:
+                            v.dxf.bulge = b
+                    pl.close(True)
+                else:
+                    edges = pc.get("edges")
+                    if rot and edges:
+                        edges = {ROT_EDGE.get(k, k): v for k, v in edges.items()}
+                    rect(px, py, pw, ph, ENVELOPE_ACI, edges)
+                prio += 1
                 for op in pc.get("openings", []):
                     if op.get("w") and op.get("h"):
                         ow = op["w"]*CM; oh = op["h"]*CM
-                        cx = px + op["from_left_cm"]*CM
-                        cy = (py + op["fromFront"]*CM + oh/2) if op.get("fromFront") is not None else (py + ph/2)
+                        lx = op["from_left_cm"]*CM
+                        ly = (op["fromFront"]*CM + oh/2) if op.get("fromFront") is not None else H0/2
+                        cx, cy = place(lx, ly)
+                        if rot:
+                            ow, oh = oh, ow
                         rect(cx-ow/2, cy-oh/2, ow, oh, OPENING_ACI)
         slabBase += mat["slabW"] + 15
     import io
