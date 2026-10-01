@@ -107,6 +107,45 @@ def _drop_collinear(verts, tol_mm=0.5):
                 out.pop(k); changed = True; break
     return out
 
+def _close_u(comp, edges, deg):
+    """פתח של שלוש צלעות (המודד לא מדד את הצלע הרביעית כי היא זהה למקבילה שלה):
+    מחזיר את ארבע הפינות אם הצלע החסרה מקבילה לבסיס ובאותו אורך, אחרת None"""
+    if len(comp) < 3 or any(edges[j]["bulge"] != 0 or len(edges[j]["pts"]) != 2 for j in comp):
+        return None
+    ends = [n for n, v in deg.items() if v == 1]
+    if len(ends) != 2 or any(v > 2 for v in deg.values()):
+        return None
+    node, left, chain = ends[0], set(comp), []
+    while left:
+        j = next((j for j in left if node in (edges[j]["a"], edges[j]["b"])), None)
+        if j is None:
+            return None
+        left.discard(j); ed = edges[j]
+        fwd = ed["a"] == node
+        chain.append(ed["pts"][0] if fwd else ed["pts"][1])
+        node = ed["b"] if fwd else ed["a"]
+        if not left:
+            chain.append(ed["pts"][1] if fwd else ed["pts"][0])
+    k = 1                                   # צלע שהמודד פיצל לשני קטעים ישרים = צלע אחת
+    while k < len(chain) - 1:
+        a, b, c = chain[k-1], chain[k], chain[k+1]
+        L = math.dist(a, c)
+        if L and abs((c[0]-a[0])*(a[1]-b[1]) - (a[0]-b[0])*(c[1]-a[1])) / L < 2.0:
+            chain.pop(k)
+        else:
+            k += 1
+    if len(chain) != 4:
+        return None
+    p0, p1, p2, p3 = chain
+    bx, by = p2[0]-p1[0], p2[1]-p1[1]; cx, cy = p0[0]-p3[0], p0[1]-p3[1]
+    lb, lc = math.hypot(bx, by), math.hypot(cx, cy)
+    if lb < 1 or lc < 1:
+        return None
+    cos = (bx*cx + by*cy) / (lb*lc)          # צלע הסגירה הולכת בכיוון ההפוך לבסיס
+    if cos > -math.cos(math.radians(2)) or abs(lb - lc) > max(5.0, 0.02*lb):
+        return None
+    return [p0, p1, p2, p3]
+
 def _area(pts):
     return 0.5 * sum(pts[i][0]*pts[i-1][1] - pts[i-1][0]*pts[i][1] for i in range(len(pts)))
 
@@ -172,6 +211,11 @@ def read_prodim(path_or_stream, min_cm=12, with_warnings=False):
                 loops.append({"verts": verts, "dense": dense, "lengths": lengths,
                               "color": _majority_color(lengths), "kind": "loop"})
                 continue
+        u = _close_u(comp, edges, deg)
+        if u:
+            loops.append({"verts": [(x, y, 0.0) for x, y in u], "dense": u, "lengths": lengths,
+                          "color": _majority_color(lengths), "kind": "loop", "completed": True})
+            continue
         pts = [pt for j in comp for pt in edges[j]["pts"]]
         open_parts.append({"bbox": _bbox(pts), "color": _majority_color(lengths), "mid": pts[len(pts)//2]})
     for c in circles:
@@ -197,6 +241,10 @@ def read_prodim(path_or_stream, min_cm=12, with_warnings=False):
             continue
         x0, y0, x1, y1 = _bbox(lp["dense"])
         w = (x1-x0)/10; h = (y1-y0)/10
+        if lp.get("completed"):   # השלמת צלע רביעית רק לפתח שבתוך חתיכה
+            warnings.append(f"קו לא סגור ({EDGE_KIND.get(lp['color'], 'צבע %d' % lp['color'])}, "
+                            f"{w:.1f}×{h:.1f}) מחוץ לחתיכות — לא נחתך. לבדוק.")
+            continue
         if lp["depth"]:
             warnings.append(f"צורה סגורה בתוך פתח ({w:.1f}×{h:.1f}) — לא ברור אם זו חתיכה. לבדוק.")
             continue
@@ -239,6 +287,8 @@ def read_prodim(path_or_stream, min_cm=12, with_warnings=False):
         # כלל גודל שגובר על הצבע: פתח קטן = פתח חשמל
         if max(ow, oh) <= 25 and min(ow, oh) <= 15:
             kind = "חשמל"
+        if lp.get("completed"):
+            warnings.append(f"חתיכה {pi+1}: {kind} {ow:g}×{oh:g} נמדד בשלוש צלעות — הושלמה הצלע הרביעית כמו המקבילה לה.")
         if kind == "פתח":
             warnings.append(f"חתיכה {pi+1}: פתח {ow:g}×{oh:g} בלי צבע של כיור/כיריים/שקע — "
                             f"לוודא שזה פתח ולא חתיכה נפרדת.")

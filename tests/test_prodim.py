@@ -23,6 +23,10 @@ def build(path):
     E = [(2600, 1000), (2660, 1000), (2660, 1120), (2600, 1120)]
     for i in range(4):
         _line(m, E[i], E[(i+1) % 4], 5)
+    # כיור בשלוש צלעות (הבסיס מפוצל לשניים) — הצלע הרביעית מושלמת
+    U = [(1600, 550), (1600, 150), (1800, 150), (2000, 150), (2000, 550)]
+    for i in range(len(U) - 1):
+        _line(m, U[i], U[i+1], 5)
     # קו פתוח בתוך החתיכה — לא נחתך, רק אזהרה
     _line(m, (200, 200), (200, 400), 7); _line(m, (200, 400), (400, 400), 7)
     # חתיכה מלבנית שהקו העליון שלה מפוצל לשניים
@@ -40,8 +44,11 @@ def main():
     assert (big["len"], big["depth"]) == (300.0, 180.0)
     assert len(big["outline"]) == 6 and not big["is_rect"]
     kinds = sorted(o["kind"] for o in big["openings"])
-    assert kinds == ["חשמל", "כיור"], kinds
-    sink = next(o for o in big["openings"] if o["kind"] == "כיור")
+    assert kinds == ["חשמל", "כיור", "כיור"], kinds
+    u = next(o for o in big["openings"] if o["kind"] == "כיור" and o["w"] == 40.0)
+    assert (u["from_left_cm"], u["from_front_cm"], u["h"]) == (180.0, 35.0, 40.0)
+    assert any("שלוש צלעות" in w for w in warns), warns
+    sink = next(o for o in big["openings"] if o["kind"] == "כיור" and o["w"] == 80.0)
     assert (sink["from_left_cm"], sink["from_front_cm"], sink["fromFront"], sink["w"], sink["h"]) == (100.0, 30.0, 10.0, 80.0, 40.0)
     assert rect["is_rect"] and len(rect["outline"]) == 4 and (rect["len"], rect["depth"]) == (100.0, 50.0)
     assert any("קו לא סגור" in w for w in warns), warns
@@ -49,7 +56,7 @@ def main():
     txt, _ = DE.gen_dxf([dict(x) for x in pieces], DE.MATERIALS["synthetic"])
     doc = ezdxf.read(io.StringIO(txt))
     pls = [e for e in doc.modelspace() if e.dxftype() == "POLYLINE"]
-    assert len(pls) == 4 and all(e.is_closed for e in pls)
+    assert len(pls) == 5 and all(e.is_closed for e in pls)
     assert {e.dxf.layer for e in pls} == {"1000-21_5"}
     print("ok")
 
