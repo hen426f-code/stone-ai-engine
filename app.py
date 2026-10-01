@@ -9,6 +9,7 @@ from gen_lib import Kitchen
 import plan_builder as PB
 import dxf_engine as DE
 import prodim_reader as PR
+import precut_check as PC
 
 app = Flask(__name__)
 CORS(app)
@@ -36,10 +37,11 @@ def norm_piece(p, is_clad=False):
     plen, pdep = _f(p.get("len")), _f(p.get("depth"))
     if not plen or not pdep or plen <= 0 or pdep <= 0:
         return None
-    ops = []
+    ops, dropped = [], 0
     for o in (p.get("openings") or []):
         ow, oh = _f(o.get("w")), _f(o.get("h"))
         if not ow or not oh:
+            dropped += 1
             continue
         # from_front_cm = מהחזית עד מרכז הפתח. בלי ערך: הפתח באמצע העומק (כמו בקובץ המכונה)
         ff = _f(o.get("from_front_cm"))
@@ -51,6 +53,8 @@ def norm_piece(p, is_clad=False):
     d = {"len": plen, "depth": pdep,
          "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
          "openings": ops}
+    if dropped:
+        d["dropped_openings"] = dropped
     # מתאר מדויק מקובץ מודד — נשמר רק אם המידות לא שונו בטבלה
     ol, olp = p.get("outline"), p.get("outline_pts")
     if isinstance(ol, list) and isinstance(olp, list) and len(ol) >= 3 and olp:
@@ -95,7 +99,8 @@ def plan():
             dxf_text, slabs = DE.gen_dxf(pieces, mat) if pieces else ("", [])
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path),
                             "dxf": dxf_text, "combos": len(combos),
-                            "slabs": len(slabs), "remnants": _remnants(slabs)})
+                            "slabs": len(slabs), "remnants": _remnants(slabs),
+                            "check": PC.check(pieces, slabs, mat) if pieces else None})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -132,14 +137,10 @@ def prodim():
             if not pieces:
                 return jsonify({"ok": False, "error": "לא זוהו חתיכות סגורות בקובץ",
                                 "warnings": warnings}), 400
-            for i, p in enumerate(pieces):
-                a, b = sorted((p["len"], p["depth"]))
-                if b > mat["slabL"] or a > mat["slabW"]:
-                    warnings.insert(0, "חתיכה %d (%g×%g) גדולה מהלוח %g×%g — צריך לפצל לפני חיתוך."
-                                    % (i + 1, p["len"], p["depth"], mat["slabL"], mat["slabW"]))
-            pdf_path = os.path.join(td, "prodim.pdf")
-            PR.render_prodim_plan(pieces, mat, pdf_path, mitre, warnings=warnings)
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
+            chk = PC.check(pieces, slabs, mat)
+            pdf_path = os.path.join(td, "prodim.pdf")
+            PR.render_prodim_plan(pieces, mat, pdf_path, mitre, warnings=chk["errors"] + warnings + chk["warnings"])
             plist = [{"label": p.get("label") or ("חתיכה %d" % (i + 1)),
                       "len": p["len"], "depth": p["depth"],
                       "openings": p.get("openings", []),
@@ -148,7 +149,7 @@ def prodim():
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(pieces), "pieces_list": plist,
                             "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs),
-                            "warnings": warnings})
+                            "warnings": warnings, "check": chk})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -171,7 +172,8 @@ def pieces_endpoint():
             PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""), title="חתיכות לחיתוך")
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
-                            "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs)})
+                            "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs),
+                            "check": PC.check(allp, slabs, mat)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -206,7 +208,8 @@ def combos_endpoint():
                 dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
                 out.append({"title": c.get("title", ""), "note": c.get("note", ""),
                             "dxf": dxf_text, "slabs": len(slabs),
-                            "pieces": len(allp), "remnants": _remnants(slabs)})
+                            "pieces": len(allp), "remnants": _remnants(slabs),
+                            "check": PC.check(allp, slabs, mat)})
             buf = _io.BytesIO(); writer.write(buf)
             pdf_b64 = base64.b64encode(buf.getvalue()).decode()
         return jsonify({"ok": True, "pdf": pdf_b64, "combos": out})
