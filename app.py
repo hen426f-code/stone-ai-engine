@@ -33,21 +33,34 @@ def _remnants(slabs):
     return out
 
 def norm_piece(p, is_clad=False):
+    plen, pdep = _f(p.get("len")), _f(p.get("depth"))
+    if not plen or not pdep or plen <= 0 or pdep <= 0:
+        return None
     ops = []
     for o in (p.get("openings") or []):
         ow, oh = _f(o.get("w")), _f(o.get("h"))
         if not ow or not oh:
             continue
+        # from_front_cm = מהחזית עד מרכז הפתח. בלי ערך: הפתח באמצע העומק (כמו בקובץ המכונה)
+        ff = _f(o.get("from_front_cm"))
         ops.append({"kind": o.get("kind") or "פתח",
                     "from_left_cm": _f(o.get("from_left_cm"), 0) or 0,
-                    "from_front_cm": _f(o.get("from_front_cm"), 0) or 0,
+                    "from_front_cm": ff if ff is not None else pdep / 2,
+                    "fromFront": (ff - oh / 2) if ff is not None else None,
                     "w": ow, "h": oh})
-    plen, pdep = _f(p.get("len")), _f(p.get("depth"))
-    if not plen or not pdep or plen <= 0 or pdep <= 0:
-        return None
     d = {"len": plen, "depth": pdep,
          "label": p.get("label") or ("ציפוי קיר" if is_clad else "חתיכה"),
          "openings": ops}
+    # מתאר מדויק מקובץ מודד — נשמר רק אם המידות לא שונו בטבלה
+    ol, olp = p.get("outline"), p.get("outline_pts")
+    if isinstance(ol, list) and isinstance(olp, list) and len(ol) >= 3 and olp:
+        try:
+            xs = [float(v[0]) for v in olp]; ys = [float(v[1]) for v in olp]
+            if abs((max(xs) - min(xs)) / 10 - plen) <= 0.15 and abs((max(ys) - min(ys)) / 10 - pdep) <= 0.15:
+                d["outline"] = [(float(v[0]), float(v[1]), float(v[2])) for v in ol]
+                d["outline_pts"] = [(float(v[0]), float(v[1])) for v in olp]
+        except (TypeError, ValueError, IndexError):
+            pass
     if isinstance(p.get("edges"), dict):
         d["edges"] = {k: v for k, v in p["edges"].items() if v in ("fe", "mitre")}
     fe = _f(p.get("fe_cm"))
@@ -115,18 +128,27 @@ def prodim():
             else:
                 txt = (request.get_json(silent=True) or {}).get("dxf_text", "")
                 open(src, "w", encoding="utf-8", errors="ignore").write(txt)
-            pieces, mitre = PR.read_prodim(src)
+            pieces, mitre, warnings = PR.read_prodim(src, with_warnings=True)
             if not pieces:
-                return jsonify({"ok": False, "error": "לא זוהו חתיכות (ירוק=עיבוד) בקובץ"}), 400
+                return jsonify({"ok": False, "error": "לא זוהו חתיכות סגורות בקובץ",
+                                "warnings": warnings}), 400
+            for i, p in enumerate(pieces):
+                a, b = sorted((p["len"], p["depth"]))
+                if b > mat["slabL"] or a > mat["slabW"]:
+                    warnings.insert(0, "חתיכה %d (%g×%g) גדולה מהלוח %g×%g — צריך לפצל לפני חיתוך."
+                                    % (i + 1, p["len"], p["depth"], mat["slabL"], mat["slabW"]))
             pdf_path = os.path.join(td, "prodim.pdf")
-            PR.render_prodim_plan(pieces, mat, pdf_path, mitre)
+            PR.render_prodim_plan(pieces, mat, pdf_path, mitre, warnings=warnings)
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
             plist = [{"label": p.get("label") or ("חתיכה %d" % (i + 1)),
                       "len": p["len"], "depth": p["depth"],
-                      "openings": p.get("openings", [])} for i, p in enumerate(pieces)]
+                      "openings": p.get("openings", []),
+                      "outline": p["outline"], "outline_pts": p["outline_pts"],
+                      "edges_m": p["edges_m"]} for i, p in enumerate(pieces)]
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(pieces), "pieces_list": plist,
-                            "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs)})
+                            "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs),
+                            "warnings": warnings})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
