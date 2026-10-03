@@ -74,13 +74,14 @@ def _walk(comp_edges, edges):
     used = {comp_edges[0]}; verts = []; dense = []
     cur_edge, node = first, first["b"]
     def push(ed, forward):
+        # כל קודקוד: (x, y, bulge, צבע הקטע שמתחיל בו), כדי לדעת איזו צלע היא גרונג
         pts = ed["pts"] if forward else ed["pts"][::-1]
-        b = ed["bulge"]
+        b, c = ed["bulge"], ed["color"]
         if b is None:      # עקומה כללית: נכנסת כרצף קטעים ישרים
             for p in pts[:-1]:
-                verts.append((p[0], p[1], 0.0))
+                verts.append((p[0], p[1], 0.0, c))
         else:
-            verts.append((pts[0][0], pts[0][1], b if forward else -b))
+            verts.append((pts[0][0], pts[0][1], b if forward else -b, c))
         dense.extend(pts[:-1])
     push(first, True)
     while True:
@@ -100,7 +101,8 @@ def _drop_collinear(verts, tol_mm=0.5):
         changed = False
         for k in range(len(out)):
             a, b, c = out[k-1], out[k], out[(k+1) % len(out)]
-            if a[2] or b[2]:
+            # לא מאחדים צלע גרונג עם צלע רגילה, כדי לא לאבד איזה קטע נחתך בזווית
+            if a[2] or b[2] or (a[3] != b[3] and (a[3] in (MITRE, 8) or b[3] in (MITRE, 8))):
                 continue
             L = math.dist(a[:2], c[:2])
             if L and abs((c[0]-a[0])*(a[1]-b[1]) - (a[0]-b[0])*(c[1]-a[1])) / L < tol_mm:
@@ -213,7 +215,7 @@ def read_prodim(path_or_stream, min_cm=12, with_warnings=False):
                 continue
         u = _close_u(comp, edges, deg)
         if u:
-            loops.append({"verts": [(x, y, 0.0) for x, y in u], "dense": u, "lengths": lengths,
+            loops.append({"verts": [(x, y, 0.0, _majority_color(lengths)) for x, y in u], "dense": u, "lengths": lengths,
                           "color": _majority_color(lengths), "kind": "loop", "completed": True})
             continue
         pts = [pt for j in comp for pt in edges[j]["pts"]]
@@ -254,15 +256,20 @@ def read_prodim(path_or_stream, min_cm=12, with_warnings=False):
         verts = lp["verts"]
         if _area([(v[0], v[1]) for v in verts]) < 0:     # כיוון אחיד נגד השעון
             rev = verts[::-1]
-            verts = [(rev[k][0], rev[k][1], -rev[k-1][2]) for k in range(len(rev))]
+            # הקשת של הקטע rev[k] -> rev[k+1] נשמרה בקודקוד rev[k+1] (תחילת הקטע בכיוון המקורי)
+            verts = [(rev[k][0], rev[k][1], -rev[(k+1) % len(rev)][2], rev[(k+1) % len(rev)][3])
+                     for k in range(len(rev))]
         verts = _drop_collinear(verts)
-        outline = [(round(vx-x0, 2), round(vy-y0, 2), round(b, 6)) for vx, vy, b in verts]
+        outline = [(round(vx-x0, 2), round(vy-y0, 2), round(b, 6)) for vx, vy, b, _ in verts]
+        mitre_segs = [k for k, v in enumerate(verts) if v[3] in (MITRE, 8)]
         skew_mm = max(min(abs(vx), abs(vx-(x1-x0))) + min(abs(vy), abs(vy-(y1-y0))) for vx, vy, _ in outline)
         is_rect = len(outline) == 4 and not any(b for _, _, b in outline) and skew_mm < 1
         edge_m = {EDGE_KIND.get(c, f"צבע {c}"): round(L/1000, 2) for c, L in lp["lengths"].items()}
         pc = {"len": round(w, 1), "depth": round(h, 1), "bbox": (x0, y0, x1, y1), "openings": [],
               "outline": outline, "outline_pts": [(round(p[0]-x0, 1), round(p[1]-y0, 1)) for p in lp["dense"]],
               "is_rect": is_rect, "edges_m": edge_m}
+        if mitre_segs:
+            pc["mitre_segs"] = mitre_segs   # אינדקס קטע במתאר (מקודקוד k לקודקוד k+1) שנחתך בזווית
         piece_of_loop[i] = len(pieces); pieces.append(pc)
         n = len(pieces)
         if any(b for _, _, b in outline):

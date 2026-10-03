@@ -53,6 +53,10 @@ def check(pieces, slabs, mat):
         if p.get("dropped_openings"):
             warnings.append("%s: %d פתחים בלי רוחב או עומק לא ייחתכו. להשלים מידה אם צריך אותם."
                             % (nm, p["dropped_openings"]))
+        for k in p.get("mitre_segs") or []:
+            if p.get("outline") and k < len(p["outline"]) and p["outline"][k][2]:
+                errors.append("%s: צלע גרונג על קשת. אי אפשר לחתוך קשת בהטיית ראש, צריך לבדוק עם המודד." % nm)
+                break
         poly = [(x / 10, y / 10) for x, y in p["outline_pts"]] if p.get("outline_pts") else None
         rects = []
         for j, op in enumerate(p.get("openings") or []):

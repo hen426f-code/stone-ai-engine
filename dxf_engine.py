@@ -101,7 +101,20 @@ def gen_dxf(pieces, mat):
                 W0, H0 = (ph, pw) if rot else (pw, ph)
                 def place(x, y):
                     return (px + (H0 - y if rot else x), py + (x if rot else y))
-                if pc.get("outline"):
+                if pc.get("outline") and pc.get("mitre_segs"):
+                    # מתאר עם צלעות גרונג: כל צלע בנפרד, הגרונג על שכבת הזווית (כמו במלבן)
+                    pts = [(*place(x, y), b) for x, y, b in pc["outline"]]
+                    mit = set(pc["mitre_segs"])
+                    for k, (x, y, b) in enumerate(pts):
+                        nx, ny, _ = pts[(k + 1) % len(pts)]
+                        if k in mit and not b:
+                            msp.add_line((x, y), (nx, ny), dxfattribs={"layer": mlayer, "color": MITRE_ACI})
+                        else:
+                            seg = msp.add_polyline2d([(x, y), (nx, ny)],
+                                                     dxfattribs={"layer": layer, "color": ENVELOPE_ACI})
+                            if b:
+                                seg.vertices[0].dxf.bulge = b
+                elif pc.get("outline"):
                     # מתאר מדויק (קובץ מודד): פוליליין סגור אחד, כולל קשתות
                     pts = [(*place(x, y), b) for x, y, b in pc["outline"]]
                     pl = msp.add_polyline2d([(x, y) for x, y, _ in pts],
