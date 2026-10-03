@@ -32,7 +32,8 @@ def _opening_rect(op, depth):
 
 def _name(p, i):
     lab = p.get("label") or "חתיכה"
-    return "%s %d (%g×%g)" % (lab, i + 1, p["len"], p["depth"])
+    nm = "%s %d (%g×%g)" % (lab, i + 1, p["len"], p["depth"])
+    return "%s, %s" % (p["job"], nm) if p.get("job") else nm
 
 
 def piece_area_cm2(p):

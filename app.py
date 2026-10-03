@@ -55,6 +55,9 @@ def norm_piece(p, is_clad=False):
          "openings": ops}
     if dropped:
         d["dropped_openings"] = dropped
+    # שם העבודה, כשכמה עבודות נחתכות יחד על אותם לוחות
+    if isinstance(p.get("job"), str) and p["job"].strip():
+        d["job"] = p["job"].strip()[:40]
     # מתאר מדויק מקובץ מודד — נשמר רק אם המידות לא שונו בטבלה
     ol, olp = p.get("outline"), p.get("outline_pts")
     if isinstance(ol, list) and isinstance(olp, list) and len(ol) >= 3 and olp:
