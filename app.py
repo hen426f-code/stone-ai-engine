@@ -63,6 +63,9 @@ def norm_piece(p, is_clad=False):
             if abs((max(xs) - min(xs)) / 10 - plen) <= 0.15 and abs((max(ys) - min(ys)) / 10 - pdep) <= 0.15:
                 d["outline"] = [(float(v[0]), float(v[1]), float(v[2])) for v in ol]
                 d["outline_pts"] = [(float(v[0]), float(v[1])) for v in olp]
+                ms = p.get("mitre_segs")
+                if isinstance(ms, list):
+                    d["mitre_segs"] = [int(k) for k in ms if 0 <= int(k) < len(ol)]
         except (TypeError, ValueError, IndexError):
             pass
     if isinstance(p.get("edges"), dict):
@@ -145,7 +148,8 @@ def prodim():
                       "len": p["len"], "depth": p["depth"],
                       "openings": p.get("openings", []),
                       "outline": p["outline"], "outline_pts": p["outline_pts"],
-                      "edges_m": p["edges_m"]} for i, p in enumerate(pieces)]
+                      "edges_m": p["edges_m"], "mitre_segs": p.get("mitre_segs", [])}
+                     for i, p in enumerate(pieces)]
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(pieces), "pieces_list": plist,
                             "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs),
