@@ -33,6 +33,20 @@ def _remnants(slabs):
                 out.append({"slab": i + 1, "len": w, "depth": h})
     return out
 
+SLAB_RANGE = (100, 400)   # ס"מ, מידות לוח סבירות. מחוץ לטווח: מידות ברירת המחדל של החומר
+
+
+def _mat(src):
+    """החומר מהבקשה. מידות לוח מהמפעל (slabL, slabW) גוברות על ברירת המחדל, אם הן בטווח סביר.
+    העובי, ולכן עומק החיתוך, נשאר תמיד של החומר."""
+    src = src or {}
+    m = dict(DE.MATERIALS.get(src.get("material") or "porcelan", DE.MATERIALS["porcelan"]))
+    L, W = _f(src.get("slabL")), _f(src.get("slabW"))
+    if L and W and SLAB_RANGE[0] <= W <= L <= SLAB_RANGE[1]:
+        m["slabL"], m["slabW"] = L, W
+    return m
+
+
 def _check(pieces, slabs, mat, dxf_text):
     """הבדיקה לפני חיתוך, ובתוך usage גם אורך קווי החיתוך והגרונג בקובץ (לדוח ייצור)"""
     chk = PC.check(pieces, slabs, mat)
@@ -99,7 +113,7 @@ def plan():
     """מטבח L. body: {long,arm,depth,arm_side,sink,gas,material}"""
     try:
         b = request.get_json(force=True)
-        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        mat = _mat(b)
         k = Kitchen(float(b["long"]), float(b["arm"]), float(b["depth"]),
                     b.get("arm_side", "left"), sink=b.get("sink"), gas=b.get("gas"))
         job = b.get("job_name", "")
@@ -137,8 +151,7 @@ def _combo_to_pieces(combo, k):
 def prodim():
     """קובץ מודד. multipart 'file' או body {dxf_text}. + material."""
     try:
-        material = request.form.get("material") or (request.get_json(silent=True) or {}).get("material", "porcelan")
-        mat = DE.MATERIALS.get(material, DE.MATERIALS["porcelan"])
+        mat = _mat(request.form if request.form.get("material") else request.get_json(silent=True))
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "in.dxf")
             if "file" in request.files:
@@ -173,7 +186,7 @@ def pieces_endpoint():
        cladding:[{len,depth,label?}], material, job_name} -> PDF יפה + DXF."""
     try:
         b = request.get_json(force=True)
-        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        mat = _mat(b)
         raw = b.get("pieces") or []
         clad = b.get("cladding") or []
         norm = norm_piece
@@ -198,7 +211,7 @@ def combos_endpoint():
            cladding:[...], material, job_name}"""
     try:
         b = request.get_json(force=True)
-        mat = DE.MATERIALS.get(b.get("material", "porcelan"), DE.MATERIALS["porcelan"])
+        mat = _mat(b)
         clad = [x for x in (norm_piece(p, True) for p in (b.get("cladding") or [])) if x]
         combos = b.get("combos") or []
         if not combos:
