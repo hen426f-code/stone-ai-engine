@@ -143,6 +143,30 @@ def gen_dxf(pieces, mat):
     s = io.StringIO(); doc.write(s)
     return s.getvalue(), slabs
 
+def cut_lengths(dxf_text):
+    """אורך קווי החיתוך בקובץ, במטרים: חיתוך רגיל וגרונג בנפרד. קשתות לפי ה-bulge."""
+    import io, math
+    doc = ezdxf.read(io.StringIO(dxf_text))
+    tot = {"cut_m": 0.0, "mitre_m": 0.0}
+    def seg(p, q, b):
+        c = math.hypot(q[0] - p[0], q[1] - p[1])
+        if not b or c == 0:
+            return c
+        th = 4 * math.atan(abs(b))
+        return c / (2 * math.sin(th / 2)) * th
+    for e in doc.modelspace():
+        key = "mitre_m" if "INC" in e.dxf.layer else "cut_m"
+        if e.dxftype() == "LINE":
+            tot[key] += seg(e.dxf.start, e.dxf.end, 0)
+        elif e.dxftype() == "POLYLINE":
+            vs = list(e.vertices)
+            n = len(vs) if e.is_closed else len(vs) - 1
+            for k in range(n):
+                a, b2 = vs[k], vs[(k + 1) % len(vs)]
+                tot[key] += seg(a.dxf.location, b2.dxf.location, a.dxf.bulge)
+    return {k: round(v / 1000, 2) for k, v in tot.items()}   # מ"מ -> מטר
+
+
 if __name__ == "__main__":
     d, slabs = gen_dxf([{"len": 301, "depth": 64, "openings": [{"from_left_cm": 150, "w": 78, "h": 50, "fromFront": 8}]},
                         {"len": 154, "depth": 64, "openings": []}], MATERIALS["porcelan"])
