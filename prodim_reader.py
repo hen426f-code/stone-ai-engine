@@ -363,38 +363,64 @@ def _draw_piece(c, x, y, w_cm, h_cm, scale, color, num, piece):
         c.setFillColor(sF); c.setFont(FONT_BOLD, 7)
         c.drawCentredString(ocx, ocy-3, heb(f"{name} {op['w']:g}×{op['h']:g}"))
 
+def _layout_pieces(pieces, scale):
+    """פריסת החתיכות בשורות, ועמוד חדש כשנגמר המקום. מחזיר [[(i, x, y_top)]]"""
+    pages, cur = [], []
+    x = 60; y = PAGE_H-140; rowh = 0
+    for i, p in enumerate(pieces):
+        W = p['len']*scale; Hh = p['depth']*scale
+        if x + W > PAGE_W-50 and cur:
+            x = 60; y -= (rowh + 55); rowh = 0
+        if y - Hh < 120 and cur:
+            pages.append(cur); cur = []
+            x = 60; y = PAGE_H-140; rowh = 0
+        cur.append((i, x, y))
+        x += W + 55; rowh = max(rowh, Hh)
+    if cur:
+        pages.append(cur)
+    return pages
+
+
+def _job_tag(c, x, y, piece):
+    """שם העבודה של החתיכה, כשכמה עבודות נחתכות על אותם לוחות"""
+    if piece.get("job"):
+        c.setFillColor(C_LINE); c.setFont(FONT_NAME, 7)
+        c.drawString(x, y, heb(str(piece["job"])[:30]))
+
+
 def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name="", title=None, warnings=None):
     from dxf_engine import nest_pieces
-    slabs = nest_pieces([dict(p) for p in pieces], mat["slabL"], mat["slabW"])
+    numbered = [dict(p, _n=i+1) for i, p in enumerate(pieces)]
+    slabs = nest_pieces([dict(p) for p in numbered], mat["slabL"], mat["slabW"])
     c = canvas.Canvas(out_path, pagesize=PAGE)
     def bg(): c.setFillColor(C_BG); c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
     warnings = warnings or []
-    total = len(slabs) + 1 + (1 if warnings else 0)
-    # עמוד 1 — רשימת חתיכות
-    bg()
-    draw_header(c, (job_name+"  ·  " if job_name else "")+(title or "חתיכות לחיתוך"),
-                f"{len(pieces)} חתיכות · {mat['he']} · לוח {mat['slabL']}×{mat['slabW']}", 1, total)
-    # פריסת החתיכות בשורות
-    x = 60; y = PAGE_H-140; rowh = 0; scale = min(0.9, (PAGE_W-120)/max(p['len'] for p in pieces))
-    for i, p in enumerate(pieces):
-        W = p['len']*scale; Hh = p['depth']*scale
-        if x + W > PAGE_W-50:
-            x = 60; y -= (rowh + 55); rowh = 0
-        if y - Hh < 120:
-            break
-        _draw_piece(c, x, y-Hh, p['len'], p['depth'], scale, PIECE_COLORS[i % len(PIECE_COLORS)], i+1, p)
-        x += W + 55; rowh = max(rowh, Hh)
-    notes = ["כל החתיכות מוכנות לחיתוך.",
-             "עיבוד חזית מסומן בקו כתום עם הסימן ‖ ואורך העיבוד.",
-             "הפתחים (כיור/כיריים/שקע) מסומנים על כל חתיכה עם המידות."]
-    if has_mitre: notes.append("שים לב: יש בקובץ חיתוכי גרונג (46°) — מבוצעים בהטיית הראש.")
-    draw_notes(c, notes)
-    c.showPage()
+    scale = min(0.9, (PAGE_W-120)/max(p['len'] for p in pieces))
+    piece_pages = _layout_pieces(pieces, scale)
+    npp = len(piece_pages)
+    total = len(slabs) + npp + (1 if warnings else 0)
+    # עמוד 1 ואילך — רשימת חתיכות. אף חתיכה לא נשמטת: כשנגמר המקום ממשיכים בעמוד הבא
+    for pi, page in enumerate(piece_pages):
+        bg()
+        draw_header(c, (job_name+"  ·  " if job_name else "")+(title or "חתיכות לחיתוך"),
+                    f"{len(pieces)} חתיכות · {mat['he']} · לוח {mat['slabL']}×{mat['slabW']}"
+                    + (f" · עמוד חתיכות {pi+1} מתוך {npp}" if npp > 1 else ""), pi+1, total)
+        for i, x, y in page:
+            p = pieces[i]; Hh = p['depth']*scale
+            _draw_piece(c, x, y-Hh, p['len'], p['depth'], scale, PIECE_COLORS[i % len(PIECE_COLORS)], i+1, p)
+            _job_tag(c, x+26, y-17, p)
+        if pi == npp - 1:
+            notes = ["כל החתיכות מוכנות לחיתוך.",
+                     "עיבוד חזית מסומן בקו כתום עם הסימן ‖ ואורך העיבוד.",
+                     "הפתחים (כיור/כיריים/שקע) מסומנים על כל חתיכה עם המידות."]
+            if has_mitre: notes.append("שים לב: יש בקובץ חיתוכי גרונג (46°) — מבוצעים בהטיית הראש.")
+            draw_notes(c, notes)
+        c.showPage()
     # עמודים — סידור על כל לוח
     CM = 10
     for si, slab in enumerate(slabs):
         bg()
-        draw_header(c, f"סידור על לוח {si+1}", f"{mat['he']} · {mat['slabL']}×{mat['slabW']} ס\"מ", si+2, total)
+        draw_header(c, f"סידור על לוח {si+1}", f"{mat['he']} · {mat['slabL']}×{mat['slabW']} ס\"מ", npp+si+1, total)
         margin = 60; avail_w = PAGE_W-2*margin; avail_h = PAGE_H-200
         sc = min(avail_w/mat['slabL'], avail_h/mat['slabW'])
         ox = margin; oy = 120
@@ -415,7 +441,10 @@ def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name="", titl
                 c.setStrokeColor(col); c.setLineWidth(1.5)
                 _shape(c, X, Y, W, Hh, pc, sc/10, col, rot=pc.get("rot"))
                 c.setFillColor(C_LINE); c.setFont(FONT_BOLD, 8)
-                c.drawCentredString(X+W/2, Y+Hh/2-3, f"{pc['len']:g}×{pc['depth']:g}")
+                c.drawCentredString(X+W/2, Y+Hh/2-3, f"#{pc['_n']}  {pc['len']:g}×{pc['depth']:g}")
+                if pc.get("job"):
+                    c.setFont(FONT_NAME, 7)
+                    c.drawCentredString(X+W/2, Y+Hh/2-13, heb(str(pc["job"])[:30]))
         c.showPage()
     if warnings:
         bg()
