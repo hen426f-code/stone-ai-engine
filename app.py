@@ -33,6 +33,13 @@ def _remnants(slabs):
                 out.append({"slab": i + 1, "len": w, "depth": h})
     return out
 
+def _check(pieces, slabs, mat, dxf_text):
+    """הבדיקה לפני חיתוך, ובתוך usage גם אורך קווי החיתוך והגרונג בקובץ (לדוח ייצור)"""
+    chk = PC.check(pieces, slabs, mat)
+    chk["usage"].update(DE.cut_lengths(dxf_text))
+    return chk
+
+
 def norm_piece(p, is_clad=False):
     plen, pdep = _f(p.get("len")), _f(p.get("depth"))
     if not plen or not pdep or plen <= 0 or pdep <= 0:
@@ -106,7 +113,7 @@ def plan():
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path),
                             "dxf": dxf_text, "combos": len(combos),
                             "slabs": len(slabs), "remnants": _remnants(slabs),
-                            "check": PC.check(pieces, slabs, mat) if pieces else None})
+                            "check": _check(pieces, slabs, mat, dxf_text) if pieces else None})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -144,7 +151,7 @@ def prodim():
                 return jsonify({"ok": False, "error": "לא זוהו חתיכות סגורות בקובץ",
                                 "warnings": warnings}), 400
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in pieces], mat)
-            chk = PC.check(pieces, slabs, mat)
+            chk = _check(pieces, slabs, mat, dxf_text)
             pdf_path = os.path.join(td, "prodim.pdf")
             PR.render_prodim_plan(pieces, mat, pdf_path, mitre, warnings=chk["errors"] + warnings + chk["warnings"])
             plist = [{"label": p.get("label") or ("חתיכה %d" % (i + 1)),
@@ -180,7 +187,7 @@ def pieces_endpoint():
             dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs),
-                            "check": PC.check(allp, slabs, mat)})
+                            "check": _check(allp, slabs, mat, dxf_text)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -216,7 +223,7 @@ def combos_endpoint():
                 out.append({"title": c.get("title", ""), "note": c.get("note", ""),
                             "dxf": dxf_text, "slabs": len(slabs),
                             "pieces": len(allp), "remnants": _remnants(slabs),
-                            "check": PC.check(allp, slabs, mat)})
+                            "check": _check(allp, slabs, mat, dxf_text)})
             buf = _io.BytesIO(); writer.write(buf)
             pdf_b64 = base64.b64encode(buf.getvalue()).decode()
         return jsonify({"ok": True, "pdf": pdf_b64, "combos": out})
