@@ -1,0 +1,21 @@
+# שומר את המנוע ער בתוכנית החינמית של Render.
+# Render מרדים שירות חינמי אחרי 15 דקות בלי בקשות, וההתעוררות לוקחת כ־50 שניות.
+# הבדיקה הזאת פונה לכתובת הבריאות של המנוע כל 10 דקות כדי שלא יירדם.
+# שירות אחד שרץ כל החודש צורך עד 744 שעות, בתוך מכסת 750 השעות החינמיות של Render.
+name: keep-engine-awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping engine health endpoint
+        run: |
+          curl -fsS --retry 3 --retry-delay 10 --max-time 90 \
+            https://stone-ai-engine.onrender.com/ -o /dev/null \
+            -w "status %{http_code} in %{time_total}s\n"
