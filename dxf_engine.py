@@ -60,9 +60,49 @@ def nest_pieces(pieces, slabL, slabW):
             s["remnants"].append({"x": 0, "y": s["usedH"], "w": slabL, "h": bottomH})
     return slabs
 
-def gen_dxf(pieces, mat):
+def place_manual(pieces, placements, slabL, slabW):
+    """סידור שהמשתמש קבע (למשל על צילום הלוח): לכל חתיכה {slab, x, y, rot} בס"מ.
+    x, y = הפינה השמאלית-קדמית של החתיכה על הלוח, אחרי סיבוב. אותו מבנה כמו nest_pieces,
+    כדי שהבדיקה לפני חיתוך, ה-PDF וה-DXF יעבדו בלי שינוי. שאריות לא מחושבות בסידור ידני."""
+    if len(placements) != len(pieces):
+        raise ValueError("הסידור הידני צריך מיקום לכל חתיכה (%d מתוך %d)" % (len(placements), len(pieces)))
+    by_slab = {}
+    for idx, (p, pl) in enumerate(zip(pieces, placements)):
+        rot = bool(pl.get("rot"))
+        ln, dp = (p["depth"], p["len"]) if rot else (p["len"], p["depth"])
+        si = int(pl.get("slab", 0))
+        if si < 0 or si > 50:
+            raise ValueError("מספר לוח לא תקין בסידור הידני")
+        by_slab.setdefault(si, []).append({"pc": {**p, "_i": idx, "len": ln, "depth": dp, "rot": rot},
+                                           "x": float(pl["x"]), "y": float(pl["y"])})
+    slabs = []
+    for si in range(max(by_slab) + 1 if by_slab else 0):
+        items = by_slab.get(si, [])
+        used = max((it["x"] + it["pc"]["len"] for it in items), default=0.0)
+        slabs.append({"rows": [{"y": 0.0, "h": slabW, "used": used, "items": items}],
+                      "usedH": slabW, "remnants": [], "manual": True})
+    return slabs
+
+
+def layout(slabs):
+    """הסידור לאתר: לכל לוח רשימת חתיכות עם המיקום בס"מ. i = מספר החתיכה ברשימה שנשלחה (מ־0)"""
+    out = []
+    for sl in slabs:
+        row = []
+        for sh in sl["rows"]:
+            for it in sh["items"]:
+                pc = it["pc"]
+                row.append({"i": pc.get("_i"), "x": round(it["x"], 2), "y": round(it["y"], 2),
+                            "len": pc["len"], "depth": pc["depth"], "rot": bool(pc.get("rot")),
+                            "label": pc.get("label") or "", "job": pc.get("job") or ""})
+        out.append(row)
+    return out
+
+
+def gen_dxf(pieces, mat, slabs=None):
     cutDepth = mat["depth"] + 1.5  # ירידת Z תמיד עובי+1.5 (המסור נכנס מעט לשטיח הגומי לחיתוך מלא)
-    slabs = nest_pieces(pieces, mat["slabL"], mat["slabW"])
+    if slabs is None:
+        slabs = nest_pieces([dict(p, _i=i) for i, p in enumerate(pieces)], mat["slabL"], mat["slabW"])
     CM = 10
     layer = "1000-" + str(cutDepth).replace(".", "_")
     doc = ezdxf.new("R12")
