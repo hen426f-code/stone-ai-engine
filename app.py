@@ -34,6 +34,7 @@ def _remnants(slabs):
     return out
 
 SLAB_RANGE = (100, 400)   # ס"מ, מידות לוח סבירות. מחוץ לטווח: מידות ברירת המחדל של החומר
+REMNANT_MIN = 10          # ס"מ, הצד הקצר של שארית מהמלאי כשחותכים ממנה (remnant: true)
 
 
 def _mat(src):
@@ -42,8 +43,11 @@ def _mat(src):
     src = src or {}
     m = dict(DE.MATERIALS.get(src.get("material") or "porcelan", DE.MATERIALS["porcelan"]))
     L, W = _f(src.get("slabL")), _f(src.get("slabW"))
-    if L and W and SLAB_RANGE[0] <= W <= L <= SLAB_RANGE[1]:
+    lo = REMNANT_MIN if src.get("remnant") in (True, "1", "true") else SLAB_RANGE[0]
+    if L and W and lo <= W <= L <= SLAB_RANGE[1]:
         m["slabL"], m["slabW"] = L, W
+    elif lo == REMNANT_MIN:
+        raise ValueError("מידות השארית לא תקינות")
     return m
 
 
@@ -176,6 +180,7 @@ def prodim():
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(pieces), "pieces_list": plist,
                             "slabs": len(slabs), "mitre": mitre, "remnants": _remnants(slabs),
+                            "layout": DE.layout(slabs), "slabL": mat["slabL"], "slabW": mat["slabW"],
                             "warnings": warnings, "check": chk})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -194,12 +199,19 @@ def pieces_endpoint():
         allp += [x for x in (norm(p, True) for p in clad) if x]
         if not allp:
             return jsonify({"ok": False, "error": "לא התקבלו חתיכות"}), 400
+        # placements: סידור ידני (למשל מצילום הלוח), מיקום לכל חתיכה לפי הסדר: חתיכות ואז ציפוי
+        pl = b.get("placements")
+        if pl is not None and (len(allp) != len(raw) + len(clad)):
+            return jsonify({"ok": False, "error": "יש חתיכה בלי מידות, ולכן אי אפשר להתאים את הסידור הידני"}), 400
+        manual = DE.place_manual(allp, pl, mat["slabL"], mat["slabW"]) if pl is not None else None
         with tempfile.TemporaryDirectory() as td:
             pdf_path = os.path.join(td, "plan.pdf")
-            PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""), title="חתיכות לחיתוך")
-            dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat)
+            dxf_text, slabs = DE.gen_dxf([dict(p) for p in allp], mat, manual)
+            PR.render_prodim_plan(allp, mat, pdf_path, False, b.get("job_name", ""),
+                                  title="חתיכות לחיתוך" + (" · סידור ידני" if manual else ""), slabs=manual)
             return jsonify({"ok": True, "pdf": _b64_file(pdf_path), "dxf": dxf_text,
                             "pieces": len(allp), "slabs": len(slabs), "remnants": _remnants(slabs),
+                            "layout": DE.layout(slabs), "slabL": mat["slabL"], "slabW": mat["slabW"],
                             "check": _check(allp, slabs, mat, dxf_text)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -236,10 +248,11 @@ def combos_endpoint():
                 out.append({"title": c.get("title", ""), "note": c.get("note", ""),
                             "dxf": dxf_text, "slabs": len(slabs),
                             "pieces": len(allp), "remnants": _remnants(slabs),
+                            "layout": DE.layout(slabs),
                             "check": _check(allp, slabs, mat, dxf_text)})
             buf = _io.BytesIO(); writer.write(buf)
             pdf_b64 = base64.b64encode(buf.getvalue()).decode()
-        return jsonify({"ok": True, "pdf": pdf_b64, "combos": out})
+        return jsonify({"ok": True, "pdf": pdf_b64, "combos": out, "slabL": mat["slabL"], "slabW": mat["slabW"]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 

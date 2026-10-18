@@ -92,7 +92,8 @@ def check(pieces, slabs, mat):
             a, b = sorted((pc["len"], pc["depth"]))
             if b > sL + EPS or a > sW + EPS:
                 continue  # כבר דווח כחתיכה גדולה מהלוח
-            if it["x"] + pc["len"] > sL + EPS or it["y"] + pc["depth"] > sW + EPS:
+            if (it["x"] < -EPS or it["y"] < -EPS or
+                    it["x"] + pc["len"] > sL + EPS or it["y"] + pc["depth"] > sW + EPS):
                 msg = "לוח %d: חתיכה %g×%g חורגת משטח הלוח." % (si + 1, pc["len"], pc["depth"])
                 if msg not in errors:
                     errors.append(msg)

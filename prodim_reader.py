@@ -388,10 +388,14 @@ def _job_tag(c, x, y, piece):
         c.drawString(x, y, heb(str(piece["job"])[:30]))
 
 
-def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name="", title=None, warnings=None):
+def render_prodim_plan(pieces, mat, out_path, has_mitre=False, job_name="", title=None, warnings=None, slabs=None):
     from dxf_engine import nest_pieces
     numbered = [dict(p, _n=i+1) for i, p in enumerate(pieces)]
-    slabs = nest_pieces([dict(p) for p in numbered], mat["slabL"], mat["slabW"])
+    if slabs is None:
+        slabs = nest_pieces([dict(p) for p in numbered], mat["slabL"], mat["slabW"])
+    else:   # סידור ידני: אותן חתיכות, רק עם המספור של התוכנית
+        slabs = [{**sl, "rows": [{**sh, "items": [{**it, "pc": {**it["pc"], "_n": (it["pc"].get("_i") or 0) + 1}}
+                                                  for it in sh["items"]]} for sh in sl["rows"]]} for sl in slabs]
     c = canvas.Canvas(out_path, pagesize=PAGE)
     def bg(): c.setFillColor(C_BG); c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
     warnings = warnings or []
